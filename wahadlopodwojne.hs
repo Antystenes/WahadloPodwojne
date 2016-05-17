@@ -10,7 +10,8 @@ g = 9.81
 
 -- krok czasowy do obliczen
 krok :: Float
-krok = 0.000001
+krok = 0.0005
+
 
 -- masa
 masa :: Float
@@ -38,7 +39,8 @@ advanceTime step (World (Pendulum tau1 omega1) (Pendulum tau2 omega2) l time xs 
 		newomega2 = omega2 + ((domega2 l tau1 omega1 tau2 omega2) * step)
 		newtau2   = tau2   + (omega2 * step)
 		newtime	  = time + step
-		xs1	  = xs ++ [((l * ((sin newtau1) + (sin newtau2))), ((-l) * ((cos newtau1) + (cos newtau2))))]
+		xsadd	      = ((l * ((sin newtau1) + (sin newtau2))), ((-l) * ((cos newtau1) + (cos newtau2))))
+		xs1	      = if ((time * 1000) == (fromInteger ((round (time * 1000))))) then (xs ++ [xsadd]) else xs
 
 -- Funkcja przekształcająca świat o zadany krok czasowy korzystająca lekko ulepszonego schematu Eulera (tendencja zagasająca)
 advancetimebetter :: Float -> World -> World
@@ -53,7 +55,39 @@ advancetimebetter step (World (Pendulum tau1 omega1) (Pendulum tau2 omega2) la t
 		newomega2     = omega2 + ((domega2 la (0.5 * (tau1+newtau1temp)) (0.5 * (omega1 + newomega1temp)) (0.5*(tau2 + newtau2temp)) (0.5 * (omega2 + newomega2temp))) * step)
 		newtau2	      = tau2   + (newomega2 * step)
 		newtime	      = time + step
-		xs1	      = xs ++ [((la * ((sin newtau1) + (sin newtau2))), ((-la) * ((cos newtau1) + (cos newtau2))))]
+		xsadd	      = ((la * ((sin newtau1) + (sin newtau2))), ((-la) * ((cos newtau1) + (cos newtau2))))
+		xs1	      = if ((time * 1000) == (fromInteger ((round (time * 1000))))) then (xs ++ [xsadd]) else xs
+
+
+
+advancetimebetter2 :: Float -> World -> World
+advancetimebetter2 step (World (Pendulum tau1 omega1) (Pendulum tau2 omega2) la time xs ustart) = (World (Pendulum newtau1 newomega1) (Pendulum newtau2 newomega2) la newtime xs1 ustart)
+	where
+		ka1	      = ((domega1 la tau1 omega1 tau2 omega2) * step)
+		kb1	      = ((domega2 la tau1 omega1 tau2 omega2) * step)
+		newomega1temp = omega1 + (0.5 * ka1)
+		newomega2temp = omega2 + (0.5 * kb1)
+		ka2	      = ((domega1 la tau1 newomega1temp tau2 newomega2temp)*step)
+		kb2	      = ((domega2 la tau1 newomega1temp tau2 newomega2temp)*step)
+		newomega1temp2= omega1 + (0.5 * ka2)
+		newomega2temp2= omega2 + (0.5 * kb2)
+		ka3	      = ((domega1 la tau1 newomega1temp2 tau2 newomega2temp2)*step)
+		kb3	      = ((domega2 la tau1 newomega1temp2 tau2 newomega2temp2)*step)
+		newomega1temp3= omega1 + ka3
+		newomega2temp3= omega2 + kb3
+		ka4	      = ((domega1 la tau1 newomega1temp3 tau2 newomega2temp3)*step)
+		kb4	      = ((domega2 la tau1 newomega1temp3 tau2 newomega2temp3)*step)
+		newtau1	      = tau1   + (newomega1 * step)
+		newtau2	      = tau2   + (newomega2 * step)
+		newtime	      = time + step
+		newomega1     = omega1 + ((ka1 + (2*ka2) + (2*ka3) + ka4)/6.0)
+		newomega2     = omega2 + ((kb1 + (2*kb2) + (2*kb3) + kb4)/6.0)
+		xsadd	      = ((la * ((sin newtau1) + (sin newtau2))), ((-la) * ((cos newtau1) + (cos newtau2))))
+		xs1	      = if (length xs > 20000) then (adder (tail xs)) else (adder xs)
+		adder list    = (if (((round (time / krok)) `mod` 10) == 0) then (list ++ [xsadd]) else list)
+
+
+
 
 -- Funkcja generująca model energetyczny świata (listę stanów energetycznych świata) na ilość zadanych kroków 
 model :: Float -> (Float -> World -> World) -> World -> (World, [(Float, Float, Float)])
@@ -108,13 +142,16 @@ advance f view step model = f step model
 
 -- Funkcja inicjująca 
 start :: (Float -> World -> World) -> Float -> Float -> Float -> IO ()
-start f l tau1 tau2 = do
-	forkProcess(simulate (InWindow "symulacja" (1280,720) (10,10)) white 100 (World (Pendulum tau1 0.0) (Pendulum tau2 0.0) l 0.0 [] (u l tau1 tau2)) draw (advance f))
-	wykresy f l tau1 tau2
+start f la tau1 tau2 = do
+	forkProcess (simulate (InWindow "symulacja" (1280,720) (10,10)) white (round (1/krok)) (World (Pendulum tau1 0.0) (Pendulum tau2 0.0) la 0.0 [(la*((sin tau1)+(sin tau2)), (-la)*((cos tau1)+(cos tau2)))] (u la tau1 tau2)) draw (advance f))
+	wykresy f la tau1 tau2
+
 
 -- Funkcja rysująca wykresy
 wykresy :: (Float -> World -> World) -> Float -> Float -> Float -> IO ()
-wykresy f l tau1 tau2 = plotLists [] [[(t, ek/ustart) |  (ek, _, t) <- symulacja], [ (t, u/ustart) | (_, u,t) <- symulacja], [ (t, (u+ek)/ustart) | (ek, u, t) <- symulacja]]
+wykresy f la tau1 tau2 = plotLists [] [[(t, ek/ustart) |  (ek, _, t) <- symulacja], [ (t, u/ustart) | (_, u,t) <- symulacja], [ (t, (u+ek)/ustart) | (ek, u, t) <- symulacja]]
 	where 
-	symulacja = snd (model (20/krok) f ((World (Pendulum tau1 0.0) (Pendulum tau2 0.0) l 0.0 [(l * ((sin tau1) + (sin tau2)), (-l)*((cos tau1) + (cos tau2)))] ustart)))
-	ustart = u l tau1 tau2
+	symulacja = snd (model (20/krok) f ((World (Pendulum tau1 0.0) (Pendulum tau2 0.0) la 0.0 [(la * ((sin tau1) + (sin tau2)), (-la)*((cos tau1) + (cos tau2)))] ustart)))
+	ustart = u la tau1 tau2
+
+main = do start advancetimebetter2 3 (pi + 0.01) (pi - 0.01)
